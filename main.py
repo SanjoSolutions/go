@@ -29,7 +29,7 @@ class Go:
         for row in range(NUMBER_OF_ROWS):
             board[row] = [PositionState.Empty] * NUMBER_OF_COLUMNS
         prisoners = [0, 0]
-        current_player = Player.White
+        current_player = Player.Black
         can_place = [None] * NUMBER_OF_ROWS
         for row in range(NUMBER_OF_ROWS):
             can_place[row] = [True] * NUMBER_OF_COLUMNS
@@ -55,52 +55,119 @@ class Go:
         can_place = copy_board(self._can_place)
         can_place[row][column] = False
 
-        board, new_prisoners = self._remove_captured_stones_by_move(board, position)
-        prisoners = self.prisoners.copy()
-        for index in range(len(prisoners)):
-            prisoners[index] += new_prisoners[index]
+        state = Go(board, self.prisoners, self.current_player, can_place)
 
+        state = state._remove_captured_stones_by_move()
         next_player = determine_next_player(self.current_player)
 
-        return Go(board, prisoners, next_player, can_place)
+        return Go(state.board, state.prisoners, next_player, can_place)
 
-    def _remove_captured_stones(self, board):
-        prisoners = [0, 0]
-        board = copy_board(board)
+    def _remove_captured_stones_by_move(self):
+        return self._remove_groups_of_other_color_which_have_zero_liberties()
+
+    def _remove_groups_of_other_color_which_have_zero_liberties(self):
+        other_color = determine_next_player(self.current_player)
+        return self._remove_groups_of_color_which_have_zero_liberties(other_color)
+
+    def _remove_groups_of_color_which_have_zero_liberties(self, color):
+        groups = self._find_groups_of_color_which_have_zero_liberties(color)
+        state = self
+        for group in groups:
+            state = state._remove_group(group)
+        return state
+
+    def _add_prisoners(self, a, b):
+        return element_wise_addition(a, b)
+
+    def _find_groups_of_color_which_have_zero_liberties(self, color):
+        return [group for group in self._find_groups_of_color(color) if self._has_group_zero_liberties(group)]
+
+    def _find_groups_of_color(self, color):
+        board = self.board
         number_of_rows = len(board)
         number_of_columns = len(board[0])
+        groups = []
         for row in range(0, number_of_rows):
             for column in range(0, number_of_columns):
                 position = (row, column)
                 value = board[row][column]
-                if value is not PositionState.Empty:
-                    surrounded_by = determine_surrounded_by(board, position)
-                    if (
-                        (value == PositionState.Black and surrounded_by == Player.White) or
-                        (value == PositionState.White and surrounded_by == Player.Black)
-                    ):
-                        board[row][column] = PositionState.Empty
-                        prisoners[int(surrounded_by) - 1] += 1
-        return board, prisoners
+                if value is color:
+                    group = self._find_group(groups, position)
+                    if group is None:
+                        group = set()
+                        groups.append(group)
+                    group.add(position)
+        return groups
 
-    def _remove_captured_stones_by_move(self, board, move):
-        prisoners = [0, 0]
-        board = copy_board(board)
-        number_of_rows = len(board)
-        number_of_columns = len(board[0])
-        for row in range(0, number_of_rows):
-            for column in range(0, number_of_columns):
-                position = (row, column)
-                value = board[row][column]
-                if value is not PositionState.Empty:
-                    surrounded_by = determine_surrounded_by_by_move(board, position, move)
-                    if (
-                        (value == PositionState.Black and surrounded_by == Player.White) or
-                        (value == PositionState.White and surrounded_by == Player.Black)
-                    ):
-                        board[row][column] = PositionState.Empty
-                        prisoners[int(surrounded_by) - 1] += 1
-        return board, prisoners
+    def _has_group_zero_liberties(self, group):
+        return self._determine_number_of_liberties_of_group(group) == 0
+
+    def _determine_number_of_liberties_of_group(self, group):
+        return len(self._determine_liberties_of_group(group))
+
+    def _determine_liberties_of_group(self, group):
+        liberties = set()
+        for position in group:
+            liberties |= self._determine_liberties(position)
+        return liberties
+
+    def _determine_liberties(self, position):
+        return self._filter_liberties(self._determine_adjacent_positions(position))
+
+    def _filter_liberties(self, positions):
+        return set(position for position in positions if self._is_liberty(position))
+
+    def _is_liberty(self, position):
+        row, column = position
+        return self.board[row][column] == PositionState.Empty
+
+    def _remove_group(self, group):
+        prisoners = self.prisoners.copy()
+        board = copy_board(self.board)
+
+        for position in group:
+            row, column = position
+            stone_color = board[row][column]
+            board[row][column] = PositionState.Empty
+            prisoners[determine_other_player(stone_color) - 1] += 1
+
+        state = Go(board, prisoners, self.current_player, self._can_place)
+
+        return state
+
+    def _find_group(self, groups, position):
+        try:
+            return next(group for group in groups if self._is_an_adjacent_position_in_group(group, position))
+        except StopIteration:
+            return None
+
+    def _is_an_adjacent_position_in_group(self, group, position):
+        adjacent_positions = self._determine_adjacent_positions(position)
+        return any(adjacent_position in group for adjacent_position in adjacent_positions)
+
+    def _determine_adjacent_positions(self, position):
+        row, column = position
+
+        potential_adjacent_positions = {
+            (row - 1, column),
+            (row, column + 1),
+            (row + 1, column),
+            (row, column - 1)
+        }
+
+        adjacent_positions = self._filter_valid_positions(potential_adjacent_positions)
+
+        return adjacent_positions
+
+    def _filter_valid_positions(self, positions):
+        return set(position for position in positions if self._is_valid_position(position))
+
+    def _is_valid_position(self, position):
+        row, column = position
+        return (
+            0 <= row <= NUMBER_OF_ROWS - 1 and
+            0 <= column <= NUMBER_OF_COLUMNS - 1
+        )
 
     def determine_reward(self, player):
         result = self.determine_result()
@@ -275,3 +342,13 @@ def print_state(state):
     for row in state.board:
         print([cell.value for cell in row])
     print('')
+
+
+def element_wise_addition(a, b):
+    length = max(len(a), len(b))
+    result = [0] * length
+    for index in range(len(a)):
+        result[index] += a
+    for index in range(len(b)):
+        result[index] += b
+    return result
